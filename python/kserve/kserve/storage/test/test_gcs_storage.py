@@ -136,3 +136,55 @@ def test_gcs_model_unpack_archive_file(
     assert output_dir == extract_arg_list[0][0]
     assert mock_file.close.called
     assert mock_remove.called
+
+
+@mock.patch("google.cloud.storage.Client")
+def test_download_direct_file_from_gcs(mock_client):
+    gcs_path = "gs://foo/bar/mock.object"
+
+    mock_dir = create_mock_dir("bar/")
+    mock_file = create_mock_dir_with_file("bar", "mock.object")
+
+    mock_bucket = mock.MagicMock()
+    mock_bucket.list_blobs().__iter__.return_value = [
+        mock_dir,
+        mock_file,
+    ]
+    mock_client.return_value.bucket.return_value = mock_bucket
+
+    Storage.download(gcs_path)
+
+    arg_list = get_call_args(mock_file.download_to_filename.call_args_list)
+    assert "/mock.object" in arg_list[0][0]
+
+
+@mock.patch("google.cloud.storage.Client")
+def test_download_gcs_similar_filename_not_downloaded(mock_client):
+    """
+    If uri matches with more than 1 directory in the bucket, should only process intended directory
+    eg. bucket_path is `test/folder` matches with `test/folder` and `test/folder_2`, should not process `test/folder_2`
+    """
+    gcs_path = "gs://foo/bar"
+
+    mock_dir = create_mock_dir("bar/")
+    mock_file = create_mock_dir_with_file("bar", "mock.object")
+    mock_file_3 = create_mock_dir_with_file("bar", "mock2.object")
+    mock_dir_2 = create_mock_dir("bar2/")
+    mock_file_2 = create_mock_dir_with_file("bar2", "mock.object2")
+
+    mock_bucket = mock.MagicMock()
+    mock_bucket.list_blobs().__iter__.return_value = [
+        mock_dir,
+        mock_file,
+        mock_file_3,
+        mock_dir_2,
+        mock_file_2,
+    ]
+    mock_client.return_value.bucket.return_value = mock_bucket
+
+    Storage.download(gcs_path)
+
+    arg_list = get_call_args(mock_file.download_to_filename.call_args_list)
+    arg_list += get_call_args(mock_file_2.download_to_filename.call_args_list)
+    assert "/mock.object" in arg_list[0][0]
+    assert "/mock.object2" not in arg_list[0][0]
