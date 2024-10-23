@@ -319,7 +319,6 @@ class Storage(object):
     def _download_gcs(uri, temp_dir: str) -> str:
         from google.auth import exceptions
         from google.cloud import storage
-
         try:
             storage_client = storage.Client()
         except exceptions.DefaultCredentialsError:
@@ -331,24 +330,41 @@ class Storage(object):
         prefix = bucket_path
         if not prefix.endswith("/"):
             prefix = prefix + "/"
-        blobs = bucket.list_blobs(prefix=prefix)
+
+        blobs = bucket.list_blobs(prefix=bucket_path)
         file_count = 0
         for blob in blobs:
-            # Replace any prefix from the object key with temp_dir
-            subdir_object_key = blob.name.replace(bucket_path, "", 1).lstrip("/")
-
-            # Create necessary subdirectory to store the object locally
-            if "/" in subdir_object_key:
-                local_object_dir = os.path.join(
-                    temp_dir, subdir_object_key.rsplit("/", 1)[0]
-                )
-                if not os.path.isdir(local_object_dir):
-                    os.makedirs(local_object_dir, exist_ok=True)
-            if subdir_object_key.strip() != "" and not subdir_object_key.endswith("/"):
-                dest_path = os.path.join(temp_dir, subdir_object_key)
+            if blob.name == bucket_path and not bucket_path.endswith("/"):
+                # If bucket_path provided is a single file
+                dest_path = os.path.join(temp_dir, os.path.basename(blob.name))
+                if not os.path.exists(dest_path):
+                    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
                 logger.info("Downloading: %s", dest_path)
                 blob.download_to_filename(dest_path)
                 file_count += 1
+            else:
+                # Else bucket_path provided is a directory and blob is a file within directory
+                # Replace any prefix from the object key with temp_dir
+                subdir_object_key = blob.name.replace(bucket_path, "", 1).lstrip("/")
+
+                # Skip blobs matched to bucket_path but not in the actual bucket_path
+                if blob.name.rsplit("/",1)[0] not in prefix:
+                    # eg. for model/test-folder, model/test-folder2 should not be processed
+                    continue
+
+                # Create necessary subdirectory to store the object locally
+                if "/" in subdir_object_key:
+                    local_object_dir = os.path.join(
+                        temp_dir, subdir_object_key.rsplit("/", 1)[0]
+                    )
+                    if not os.path.isdir(local_object_dir):
+                        os.makedirs(local_object_dir, exist_ok=True)
+                if subdir_object_key.strip() != "" and not subdir_object_key.endswith("/"):
+                    dest_path = os.path.join(temp_dir, subdir_object_key)
+                    logger.info("Downloading: %s", dest_path)
+                    blob.download_to_filename(dest_path)
+                    file_count += 1
+
         if file_count == 0:
             raise RuntimeError("Failed to fetch model. No model found in %s." % uri)
 
