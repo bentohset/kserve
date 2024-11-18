@@ -319,6 +319,8 @@ class Storage(object):
     def _download_gcs(uri, temp_dir: str) -> str:
         from google.auth import exceptions
         from google.cloud import storage
+        import copy
+
         try:
             storage_client = storage.Client()
         except exceptions.DefaultCredentialsError:
@@ -333,25 +335,21 @@ class Storage(object):
 
         blobs = bucket.list_blobs(prefix=bucket_path)
         file_count = 0
-        for blob in blobs:
-            if blob.name == bucket_path and not bucket_path.endswith("/"):
-                # If bucket_path provided is a single file
-                dest_path = os.path.join(temp_dir, os.path.basename(blob.name))
-                if not os.path.exists(dest_path):
-                    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-                logger.info("Downloading: %s", dest_path)
-                blob.download_to_filename(dest_path)
-                file_count += 1
-            else:
-                # Else bucket_path provided is a directory and blob is a file within directory
+
+        # Shallow copy, otherwise Iterator has already started
+        shallow_blobs = copy.copy(blobs)
+        blob = bucket.blob(bucket_path)
+        # checks if the blob is a file or a directory
+        if blob.name == bucket_path and len(list(shallow_blobs)) == 0:
+            dest_path = os.path.join(temp_dir, os.path.basename(bucket_path))
+            logger.info("Downloading single file to: %s", dest_path)
+            blob.download_to_filename(dest_path)
+            file_count = 1
+
+        else:
+            for blob in blobs:
                 # Replace any prefix from the object key with temp_dir
                 subdir_object_key = blob.name.replace(bucket_path, "", 1).lstrip("/")
-
-                # Skip blobs matched to bucket_path but not in the actual bucket_path
-                if blob.name.rsplit("/",1)[0] not in prefix:
-                    # eg. for model/test-folder, model/test-folder2 should not be processed
-                    continue
-
                 # Create necessary subdirectory to store the object locally
                 if "/" in subdir_object_key:
                     local_object_dir = os.path.join(
@@ -359,7 +357,9 @@ class Storage(object):
                     )
                     if not os.path.isdir(local_object_dir):
                         os.makedirs(local_object_dir, exist_ok=True)
-                if subdir_object_key.strip() != "" and not subdir_object_key.endswith("/"):
+                if subdir_object_key.strip() != "" and not subdir_object_key.endswith(
+                    "/"
+                ):
                     dest_path = os.path.join(temp_dir, subdir_object_key)
                     logger.info("Downloading: %s", dest_path)
                     blob.download_to_filename(dest_path)
