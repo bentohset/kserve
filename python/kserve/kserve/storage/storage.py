@@ -190,7 +190,13 @@ class Storage(object):
         # 3. ~/.aws/config file
         kwargs = {"config": Storage.get_S3_config()}
         endpoint_url = os.getenv("AWS_ENDPOINT_URL")
+        region = os.getenv("AWS_DEFAULT_REGION")
         if endpoint_url:
+            # if region and global endpoint url provided (eg. s3.amazonaws.com), insert region into endpoint url
+            match = re.match(r"^(https?)://s3\.(amazonaws|aws)\.com$", endpoint_url)
+            if match and region:
+                protocol, domain = match.group(1), match.group(2)
+                endpoint_url = f"{protocol}://s3.{region}.{domain}.com"
             kwargs.update({"endpoint_url": endpoint_url})
         verify_ssl = os.getenv("S3_VERIFY_SSL")
         if verify_ssl:
